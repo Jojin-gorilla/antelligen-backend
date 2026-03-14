@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     mysql_schema: str
     debug: bool = False
 
+    naver_client_id: str
+    naver_client_secret: str
+
+    anthropic_api_key: str
+
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
