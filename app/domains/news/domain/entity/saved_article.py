@@ -10,6 +10,7 @@ class SavedArticle:
         link: str,
         source: str | None = None,
         published_at: str | None = None,
+        snippet: str | None = None,
         content: str | None = None,
         article_id: int | None = None,
         saved_at: datetime | None = None,
@@ -19,5 +20,6 @@ class SavedArticle:
         self.link = link
         self.source = source
         self.published_at = published_at
+        self.snippet = snippet
         self.content = content
         self.saved_at = saved_at

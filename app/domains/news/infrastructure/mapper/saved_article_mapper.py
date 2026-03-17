@@ -14,6 +14,7 @@ class SavedArticleMapper:
             link_hash=hashlib.sha256(article.link.encode()).hexdigest(),
             source=article.source,
             published_at=article.published_at,
+            snippet=article.snippet,
             content=article.content,
             saved_at=article.saved_at,
         )
@@ -26,6 +27,7 @@ class SavedArticleMapper:
             link=orm.link,
             source=orm.source,
             published_at=orm.published_at,
+            snippet=orm.snippet,
             content=orm.content,
             saved_at=orm.saved_at,
         )

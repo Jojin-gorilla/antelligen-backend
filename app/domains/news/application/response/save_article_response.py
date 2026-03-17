@@ -9,5 +9,6 @@ class SaveArticleResponse(BaseModel):
     link: str
     source: str | None = None
     published_at: str | None = None
+    snippet: str | None = None
     content: str | None = None
     saved_at: datetime

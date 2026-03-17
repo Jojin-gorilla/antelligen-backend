@@ -41,6 +41,7 @@ class SaveArticleUseCase:
             link=request.link,
             source=request.source,
             published_at=request.published_at,
+            snippet=request.snippet,
             content=content,
         )
 
@@ -53,6 +54,7 @@ class SaveArticleUseCase:
             link=saved.link,
             source=saved.source,
             published_at=saved.published_at,
+            snippet=saved.snippet,
             content=saved.content,
             saved_at=saved.saved_at,
         )

@@ -15,5 +15,6 @@ class SavedArticleOrm(Base):
     link_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     source: Mapped[str | None] = mapped_column(String(255), nullable=True)
     published_at: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     saved_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
