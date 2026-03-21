@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     mysql_host: str
     mysql_port: int
     mysql_schema: str
+    postgres_user: str
+    postgres_password: str
+    postgres_host: str
+    postgres_port: int
+    postgres_db: str
     debug: bool = False
 
     naver_client_id: str

@@ -32,8 +32,8 @@ class SubAgentResponse(BaseModel):
         allowed = {"stock", "news", "finance", "disclosure"}
         if v not in allowed:
             raise ValueError(
-                f"허용되지 않는 에이전트입니다: {v}. "
-                f"허용 목록: {', '.join(sorted(allowed))}"
+                f"Unsupported agent: {v}. "
+                f"Allowed agents: {', '.join(sorted(allowed))}"
             )
         return v
 
@@ -41,7 +41,7 @@ class SubAgentResponse(BaseModel):
     @classmethod
     def validate_execution_time(cls, v: int) -> int:
         if v < 0:
-            raise ValueError("execution_time_ms는 0 이상이어야 합니다")
+            raise ValueError("execution_time_ms must be greater than or equal to 0")
         return v
 
     def is_success(self) -> bool:
@@ -53,6 +53,7 @@ class SubAgentResponse(BaseModel):
     def get_investment_signal(self) -> Optional[InvestmentSignalResponse]:
         if self.signal is None:
             return None
+
         return InvestmentSignalResponse(
             agent_name=self.agent_name,
             ticker=self.data.get("ticker", "") if self.data else "",
