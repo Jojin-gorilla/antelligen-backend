@@ -39,7 +39,7 @@ async def get_stock(ticker: str):
     usecase = GetStockUseCase(repository)
     result = await usecase.execute(ticker)
     if result is None:
-        raise AppException(status_code=404, message=f"Stock not found: {ticker}")
+        raise AppException(status_code=404, message=f"종목을 찾을 수 없습니다: {ticker}")
     return result
 
 

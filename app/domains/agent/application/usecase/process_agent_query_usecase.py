@@ -12,9 +12,9 @@ from app.domains.agent.domain.entity.agent_query import AgentQuery, QueryOptions
 DEFAULT_AGENTS = ["stock", "news", "finance", "disclosure"]
 
 SIGNAL_LABEL = {
-    "bullish": "buy",
-    "bearish": "sell",
-    "neutral": "neutral",
+    "bullish": "매수",
+    "bearish": "매도",
+    "neutral": "중립",
 }
 
 
@@ -71,7 +71,7 @@ class ProcessAgentQueryUseCase:
         status: QueryResultStatus,
     ) -> str:
         if status == QueryResultStatus.FAILURE:
-            return "Unable to retrieve the requested analysis. Please try again."
+            return "U요청하신 정보를 조회할 수 없습니다. 잠시 후 다시 시도해 주세요."
 
         failed_names = [r.agent_name for r in results if r.is_error()]
         parts = []
@@ -85,19 +85,19 @@ class ProcessAgentQueryUseCase:
             if result.agent_name == "stock":
                 parts.append(
                     f"{result.data.get('stock_name', '')}({result.data.get('ticker', '')}) "
-                    f"current price {result.data.get('current_price', 0):,} "
-                    f"change rate {result.data.get('change_rate', 0)}%"
+                    f"현재가  {result.data.get('현재가 ', 0):,} "
+                    f"변동률  {result.data.get('변동률 ', 0)}%"
                 )
             elif signal:
                 label = SIGNAL_LABEL.get(signal.signal.value, signal.signal.value)
                 parts.append(
                     f"[{result.agent_name}] {signal.summary} "
-                    f"(signal: {label}, confidence: {signal.confidence:.0%})"
+                    f"(시그널: {label}, 신뢰도: {signal.confidence:.0%})"
                 )
 
-        answer = ". ".join(parts) + "." if parts else "No analysis result is available."
+        answer = ". ".join(parts) + "." if parts else "조회 결과가 없습니다."
 
         if status == QueryResultStatus.PARTIAL_FAILURE and failed_names:
-            answer += f" (failed agents: {', '.join(failed_names)})"
+            answer += f" (일부 조회 실패: {', '.join(failed_names)})"
 
         return answer
