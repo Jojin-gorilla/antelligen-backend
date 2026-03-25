@@ -20,3 +20,11 @@ class AccountRepositoryImpl(AccountRepositoryPort):
         if orm is None:
             return None
         return AccountMapper.to_entity(orm)
+
+    async def find_by_id(self, account_id: int) -> Optional[Account]:
+        stmt = select(AccountOrm).where(AccountOrm.id == account_id)
+        result = await self._db.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if orm is None:
+            return None
+        return AccountMapper.to_entity(orm)

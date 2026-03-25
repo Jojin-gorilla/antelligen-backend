@@ -11,6 +11,7 @@ from app.infrastructure.database.database import Base, engine
 
 import app.domains.account.infrastructure.orm.account_orm  # noqa: F401
 import app.domains.news.infrastructure.orm.saved_article_orm  # noqa: F401
+import app.domains.board.infrastructure.orm.board_orm  # noqa: F401
 import app.domains.post.infrastructure.orm.post_orm  # noqa: F401
 
 settings: Settings = get_settings()

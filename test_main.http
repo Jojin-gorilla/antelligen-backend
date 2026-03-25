@@ -108,6 +108,21 @@ Content-Type: application/json
   "content": "테스트 내용입니다."
 }
 
+### Board 게시물 작성
+POST http://127.0.0.1:33333/api/v1/board/register
+Content-Type: application/json
+Cookie: user_token=01c9f8d7-807d-453f-96e1-97d5a572355c
+
+{
+  "title": "테스트 board 게시글",
+  "content": "board 테스트 내용입니다."
+}
+
+### Board 게시물 리스트 조회
+GET http://127.0.0.1:33333/api/v1/board/list?page=1&size=10
+Accept: application/json
+Cookie: user_token=01c9f8d7-807d-453f-96e1-97d5a572355c
+
 ### Agent Schema 조회
 GET http://127.0.0.1:33333/api/v1/agent-schema
 Accept: application/json

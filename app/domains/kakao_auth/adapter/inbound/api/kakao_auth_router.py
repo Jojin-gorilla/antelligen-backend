@@ -70,13 +70,11 @@ async def request_access_token_after_redirection(
         ).execute(kakao_token.access_token)
 
         logger.info("[Kakao 사용자 정보] 닉네임: %s, 이메일: %s", user_info.nickname, user_info.email)
-        print(f"[DEBUG] 닉네임: {user_info.nickname}, 이메일: {user_info.email}")
 
         account_lookup = await FindAccountByEmailUseCase(
             AccountRepositoryImpl(db)
         ).execute(user_info.email)
 
-        print(f"[DEBUG] is_registered: {account_lookup.is_registered}")
         if account_lookup.is_registered:
             logger.info("[회원 조회] 기존 회원 확인 — email: %s", user_info.email)
             token_cache = AccountTokenCacheImpl(redis, settings.session_ttl_seconds)

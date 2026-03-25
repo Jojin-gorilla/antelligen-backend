@@ -5,11 +5,15 @@
 #   - AppException     → 정의된 status_code + BaseResponse.fail 포맷으로 반환
 #   - Exception (기타) → 500 Internal Server Error + BaseResponse.fail 포맷으로 반환
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.common.exception.app_exception import AppException
 from app.common.response.base_response import BaseResponse
+
+logger = logging.getLogger(__name__)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -26,6 +30,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         # 예상치 못한 예외 처리 (디버그 정보는 로그로만, 클라이언트엔 숨김)
+        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=500,
             content=BaseResponse.fail("Internal server error").model_dump(),

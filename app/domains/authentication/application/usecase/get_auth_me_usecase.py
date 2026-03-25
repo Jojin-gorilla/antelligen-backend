@@ -20,7 +20,6 @@ class GetAuthMeUseCase:
         # 임시 토큰 확인
         temp_data = await self._temp_token_query_port.find_by_token(token)
         if temp_data:
-            print(f"[DEBUG] TEMPORARY token: {token}, nickname: {temp_data.get('nickname')}, email: {temp_data.get('email')}")
             return AuthMeResponse(
                 tokenType="TEMPORARY",
                 user=AuthUser(
@@ -35,7 +34,6 @@ class GetAuthMeUseCase:
         if account_id:
             account = await self._account_info_query_port.find_by_id(account_id)
             if account:
-                print(f"[DEBUG] PERMANENT token: {token}, nickname: {account.nickname}, email: {account.email}")
                 return AuthMeResponse(
                     tokenType="PERMANENT",
                     user=AuthUser(

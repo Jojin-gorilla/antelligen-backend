@@ -22,7 +22,6 @@ class GetTempUserInfoUseCase:
         if temp_data:
             nickname = temp_data.get("nickname")
             email = temp_data.get("email")
-            print(f"[DEBUG] temp_token: {token}, nickname: {nickname}, email: {email}")
             return TempUserInfoResponse(
                 is_registered=False,
                 nickname=nickname,
@@ -34,7 +33,6 @@ class GetTempUserInfoUseCase:
         if account_id:
             account = await self._account_info_query_port.find_by_id(account_id)
             if account:
-                print(f"[DEBUG] user_token: {token}, nickname: {account.nickname}, email: {account.email}")
                 return TempUserInfoResponse(
                     is_registered=True,
                     nickname=account.nickname,
