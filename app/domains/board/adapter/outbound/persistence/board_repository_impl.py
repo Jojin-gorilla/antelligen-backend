@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +37,27 @@ class BoardRepositoryImpl(BoardRepositoryPort):
         orm = result.scalar_one_or_none()
         if orm is None:
             return None
+        return BoardMapper.to_entity(orm)
+
+    async def delete(self, board_id: int) -> None:
+        stmt = select(BoardOrm).where(BoardOrm.id == board_id)
+        result = await self._db.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if orm is not None:
+            await self._db.delete(orm)
+            await self._db.commit()
+
+    async def update(self, board: Board) -> Board:
+        stmt = select(BoardOrm).where(BoardOrm.id == board.board_id)
+        result = await self._db.execute(stmt)
+        orm = result.scalar_one_or_none()
+        if orm is None:
+            raise ValueError(f"Board {board.board_id} not found")
+        orm.title = board.title
+        orm.content = board.content
+        orm.updated_at = datetime.now()
+        await self._db.commit()
+        await self._db.refresh(orm)
         return BoardMapper.to_entity(orm)
 
     async def save(self, board: Board) -> Board:

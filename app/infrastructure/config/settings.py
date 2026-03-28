@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openai_api_key: str
 
     serp_api_key: str = ""
+    youtube_api_key: str = ""
 
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"

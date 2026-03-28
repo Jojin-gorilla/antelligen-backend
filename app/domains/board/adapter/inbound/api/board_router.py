@@ -9,7 +9,10 @@ from app.common.response.base_response import BaseResponse
 from app.domains.account.adapter.outbound.persistence.account_repository_impl import AccountRepositoryImpl
 from app.domains.board.adapter.outbound.persistence.board_repository_impl import BoardRepositoryImpl
 from app.domains.board.application.request.create_board_request import CreateBoardRequest
+from app.domains.board.application.request.update_board_request import UpdateBoardRequest
 from app.domains.board.application.usecase.create_board_usecase import CreateBoardUseCase
+from app.domains.board.application.usecase.update_board_usecase import UpdateBoardUseCase
+from app.domains.board.application.usecase.delete_board_usecase import DeleteBoardUseCase
 from app.domains.board.application.usecase.get_board_detail_usecase import GetBoardDetailUseCase
 from app.domains.board.application.usecase.get_board_list_usecase import GetBoardListUseCase
 from app.infrastructure.cache.redis_client import get_redis
@@ -108,3 +111,60 @@ async def create_board(
     logger.info("[board/register] response nickname: %s", response.nickname)
 
     return BaseResponse.ok(data=response, message="게시물 작성 성공")
+
+
+@router.delete("/delete/{board_id}")
+async def delete_board(
+    board_id: int,
+    user_token: str = Cookie(None),
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    if not user_token:
+        raise AppException(status_code=401, message="인증이 필요합니다.")
+
+    account_id_str = await redis.get(f"{SESSION_KEY_PREFIX}{user_token}")
+    if not account_id_str:
+        raise AppException(status_code=401, message="세션이 만료되었거나 유효하지 않습니다.")
+
+    account_id = int(account_id_str)
+
+    account_repo = AccountRepositoryImpl(db)
+    account = await account_repo.find_by_id(account_id)
+    if not account:
+        raise AppException(status_code=401, message="유효하지 않은 계정입니다.")
+
+    board_repo = BoardRepositoryImpl(db)
+    usecase = DeleteBoardUseCase(board_repo)
+    await usecase.execute(board_id=board_id, account_id=account_id)
+
+    return BaseResponse.ok(message="게시물 삭제 성공")
+
+
+@router.put("/edit/{board_id}")
+async def update_board(
+    board_id: int,
+    request: UpdateBoardRequest,
+    user_token: str = Cookie(None),
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    if not user_token:
+        raise AppException(status_code=401, message="인증이 필요합니다.")
+
+    account_id_str = await redis.get(f"{SESSION_KEY_PREFIX}{user_token}")
+    if not account_id_str:
+        raise AppException(status_code=401, message="세션이 만료되었거나 유효하지 않습니다.")
+
+    account_id = int(account_id_str)
+
+    account_repo = AccountRepositoryImpl(db)
+    account = await account_repo.find_by_id(account_id)
+    if not account:
+        raise AppException(status_code=401, message="유효하지 않은 계정입니다.")
+
+    board_repo = BoardRepositoryImpl(db)
+    usecase = UpdateBoardUseCase(board_repo, account_repo)
+    response = await usecase.execute(board_id=board_id, account_id=account_id, request=request)
+
+    return BaseResponse.ok(data=response, message="게시물 수정 성공")
