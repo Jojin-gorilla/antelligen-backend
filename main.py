@@ -1,3 +1,9 @@
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -22,6 +28,7 @@ import app.domains.board.infrastructure.orm.board_orm  # noqa: F401
 import app.domains.post.infrastructure.orm.post_orm  # noqa: F401
 import app.domains.stock.infrastructure.orm.stock_vector_document_orm  # noqa: F401
 import app.domains.stock_theme.infrastructure.orm.stock_theme_orm  # noqa: F401
+import app.domains.news.infrastructure.orm.collected_news_orm  # noqa: F401
 import app.domains.disclosure.infrastructure.orm.company_orm  # noqa: F401
 import app.domains.disclosure.infrastructure.orm.company_data_coverage_orm  # noqa: F401
 import app.domains.disclosure.infrastructure.orm.disclosure_orm  # noqa: F401
