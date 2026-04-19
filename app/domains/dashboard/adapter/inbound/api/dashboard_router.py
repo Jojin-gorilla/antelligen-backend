@@ -30,14 +30,22 @@ from app.domains.dashboard.application.usecase.get_macro_data_usecase import Get
 from app.domains.dashboard.application.usecase.get_nasdaq_bars_usecase import (
     GetNasdaqBarsUseCase,
 )
+from app.domains.dashboard.adapter.outbound.external.dart_announcement_client import (
+    DartAnnouncementClient,
+)
 from app.domains.dashboard.adapter.outbound.external.dart_corporate_event_client import (
     DartCorporateEventClient,
+)
+from app.domains.dashboard.adapter.outbound.external.sec_edgar_announcement_client import (
+    SecEdgarAnnouncementClient,
 )
 from app.domains.dashboard.adapter.outbound.external.yahoo_finance_corporate_event_client import (
     YahooFinanceCorporateEventClient,
 )
+from app.domains.dashboard.application.response.announcement_response import AnnouncementsResponse
 from app.domains.dashboard.application.response.corporate_event_response import CorporateEventsResponse
 from app.domains.dashboard.application.response.price_event_response import PriceEventsResponse
+from app.domains.dashboard.application.usecase.get_announcements_usecase import GetAnnouncementsUseCase
 from app.domains.dashboard.application.usecase.get_corporate_events_usecase import (
     GetCorporateEventsUseCase,
 )
@@ -180,6 +188,40 @@ async def get_corporate_events(
     result = await GetCorporateEventsUseCase(
         yfinance_port=YahooFinanceCorporateEventClient(),
         dart_client=DartCorporateEventClient(),
+    ).execute(ticker=ticker, period=period, corp_code=corp_code)
+
+    return BaseResponse.ok(data=result)
+
+
+@router.get("/stocks/{ticker}/announcements", response_model=BaseResponse[AnnouncementsResponse])
+async def get_announcements(
+    ticker: str,
+    period: str = Query("1Y", description="조회 기간: 1D | 1W | 1M | 1Y"),
+    db: AsyncSession = Depends(get_db),
+):
+    """합병/인수/계약 공시를 반환합니다.
+
+    한국 종목(6자리 숫자): DART 주요사항보고서
+    미국 종목: SEC EDGAR 8-K 공시
+    """
+    if period not in _VALID_PERIODS:
+        raise AppException(
+            status_code=400,
+            message=f"유효하지 않은 period입니다. 사용 가능: {', '.join(sorted(_VALID_PERIODS))}",
+        )
+
+    ticker = ticker.upper()
+    corp_code = None
+    if ticker.isdigit() and len(ticker) == 6:
+        from app.domains.disclosure.adapter.outbound.persistence.company_repository_impl import (
+            CompanyRepositoryImpl,
+        )
+        company = await CompanyRepositoryImpl(db).find_by_stock_code(ticker)
+        corp_code = company.corp_code if company else None
+
+    result = await GetAnnouncementsUseCase(
+        sec_edgar_port=SecEdgarAnnouncementClient(),
+        dart_client=DartAnnouncementClient(),
     ).execute(ticker=ticker, period=period, corp_code=corp_code)
 
     return BaseResponse.ok(data=result)
