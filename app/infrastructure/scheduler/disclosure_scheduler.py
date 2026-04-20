@@ -86,6 +86,9 @@ def create_disclosure_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=7, minute=0, timezone=KST),
         id="collect_nasdaq_bars",
         name="Collect NASDAQ daily OHLCV bars",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
 
     # Daily 05:00 KST — 거시 경제 리스크 판단 스냅샷 갱신
     scheduler.add_job(
