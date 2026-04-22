@@ -29,9 +29,13 @@ _SERIES_CONFIG: dict[str, tuple[str, str, bool, str]] = {
     "CPIAUCSL":     ("CPI", "CPI", True, "CPI 발표"),
     "UNRATE":       ("UNEMPLOYMENT", "실업률", False, "실업률 발표"),
     # KR — FRED OECD/BOK 시리즈
+    # 2026-04 §17 결정: CPALTT01KRM657N(MoM 성장률)에 apply_yoy=True 를 걸면
+    # 성장률의 YoY를 재계산하는 것이 되어 ±수백% 독성값 발생.
+    # KORCPIALLMINMEI(원지수, 2010=100) 로 교체. apply_yoy=True 유지해 정상 YoY %.
+    # 실업률: LRHUTTTTKRIQ156S(분기, Q)는 미지원 ID로 FRED 400. M(월간) 으로 교체.
     "INTDSRKRM193N":    ("INTEREST_RATE", "기준금리 (BOK)", False, "한국 기준금리"),
-    "CPALTT01KRM657N":  ("CPI", "CPI (한국)", True, "한국 CPI 발표"),   # OECD CPI index → YoY
-    "LRHUTTTTKRIQ156S": ("UNEMPLOYMENT", "실업률 (한국)", False, "한국 실업률"),
+    "KORCPIALLMINMEI":  ("CPI", "CPI (한국)", True, "한국 CPI 발표"),   # OECD CPI index → YoY
+    "LRHUTTTTKRM156S":  ("UNEMPLOYMENT", "실업률 (한국)", False, "한국 실업률"),
     # TODO: 글로벌 공통 이벤트(유가 WTISPLC 등) 필요 시 "GLOBAL" 리전 추가
 }
 
@@ -50,7 +54,7 @@ def macro_fallback_titles() -> dict[str, str]:
 
 _REGION_SERIES: dict[str, list[str]] = {
     "US": ["FEDFUNDS", "CPIAUCSL", "UNRATE"],
-    "KR": ["INTDSRKRM193N", "CPALTT01KRM657N", "LRHUTTTTKRIQ156S"],
+    "KR": ["INTDSRKRM193N", "KORCPIALLMINMEI", "LRHUTTTTKRM156S"],
 }
 
 _DEFAULT_REGION = "US"

@@ -16,15 +16,25 @@ from app.domains.dashboard.application.usecase.get_economic_events_usecase impor
     _SERIES_CONFIG,
 )
 from app.domains.history_agent.application.request.title_request import TitleBatchRequest
+from app.domains.history_agent.application.response.anomaly_bar_response import (
+    AnomalyBarsResponse,
+)
 from app.domains.history_agent.application.response.timeline_response import TimelineResponse
 from app.domains.history_agent.application.response.title_response import TitleBatchResponse
 from app.domains.history_agent.application.usecase.collect_important_macro_events_usecase import (
     CollectImportantMacroEventsUseCase,
 )
+from app.domains.history_agent.application.usecase.detect_anomaly_bars_usecase import (
+    DetectAnomalyBarsUseCase,
+)
 from app.domains.history_agent.application.usecase.generate_titles_usecase import (
     GenerateTitlesUseCase,
 )
 from app.domains.history_agent.application.usecase.history_agent_usecase import HistoryAgentUseCase
+from app.domains.dashboard.adapter.outbound.external.yahoo_finance_stock_client import (
+    YahooFinanceStockClient,
+    normalize_chart_interval,
+)
 from app.domains.history_agent.di import (
     get_collect_important_macro_events_usecase,
     get_fred_macro_port,
@@ -40,7 +50,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/history-agent", tags=["HistoryAgent"])
 
-_VALID_PERIODS = {"1D", "1W", "1M", "1Y"}
+_VALID_PERIODS = {"1D", "1W", "1M", "1Y", "1Q"}  # "1Y"는 하위 호환 (→ 내부 "1Q" 매핑)
+_VALID_CHART_INTERVALS = {"1D", "1W", "1M", "1Q"}
 # /macro-timeline은 더 긴 역사적 범위를 커버하도록 별도 세트 사용.
 _VALID_MACRO_PERIODS = {"1M", "3M", "6M", "1Y", "2Y", "5Y", "10Y"}
 _VALID_MACRO_REGIONS = {"US", "KR", "GLOBAL"}
@@ -61,34 +72,40 @@ async def _resolve_corp_code(ticker: str, db: AsyncSession) -> Optional[str]:
 @router.get("/timeline", response_model=BaseResponse[TimelineResponse])
 async def get_timeline(
     ticker: str = Query(..., description="종목 코드 (예: AAPL, 005930)"),
-    period: str = Query("1Y", description="조회 기간: 1D | 1W | 1M | 1Y"),
+    chart_interval: Optional[str] = Query(None, description="봉 단위: 1D | 1W | 1M | 1Q"),
+    period: Optional[str] = Query(None, description="(deprecated) chart_interval 별칭. 1Y → 1Q 자동 매핑"),
     enrich_titles: bool = Query(True, description="LLM 타이틀 생성 여부. False면 rule-based 타이틀만 반환"),
     db: AsyncSession = Depends(get_db),
     usecase: HistoryAgentUseCase = Depends(get_history_agent_usecase),
 ):
-    """가격·기업·공시 이벤트를 날짜순으로 통합한 타임라인을 반환합니다.
+    """CORPORATE·ANNOUNCEMENT·NEWS·MACRO 이벤트 타임라인을 반환합니다.
 
-    - PRICE: 52주 신고가/신저가, 급등락, 거래량 급증, 갭
+    §13.4 C: PRICE 카테고리는 `/anomaly-bars` 엔드포인트로 이관됨.
+
     - CORPORATE: 실적, 배당, 유상증자, 자사주, 임원변동
     - ANNOUNCEMENT: 합병/인수/계약 공시 (DART or SEC EDGAR)
+    - NEWS: 최근 뉴스 (한국어 요약 포함)
+    - MACRO: 거시 이벤트 (INDEX·ETF 경로)
 
     asset_type별 동작 차이:
-    - EQUITY: PRICE·CORPORATE·ANNOUNCEMENT 수집 + causality 분석 포함
-    - INDEX (^IXIC, ^GSPC 등): PRICE + MACRO 수집, causality=null (개별 종목 기반 분석 부적합)
-    - ETF (SPY 등): 빈 타임라인 반환 (is_etf=true)
+    - EQUITY: CORPORATE·ANNOUNCEMENT·NEWS·fundamentals 수집
+    - INDEX (^IXIC, ^GSPC 등): MACRO + NEWS 수집
+    - ETF (SPY 등): MACRO + NEWS + holdings constituent 이벤트 수집
     - 기타(MUTUALFUND/CRYPTO 등 미지원): 빈 타임라인 + asset_type=<원본값>
     """
-    if period not in _VALID_PERIODS:
+    effective = chart_interval or period or "1Y"
+    effective = normalize_chart_interval(effective)
+    if effective not in _VALID_CHART_INTERVALS:
         raise AppException(
             status_code=400,
-            message=f"유효하지 않은 period입니다. 사용 가능: {', '.join(sorted(_VALID_PERIODS))}",
+            message=f"유효하지 않은 chart_interval입니다. 사용 가능: {', '.join(sorted(_VALID_CHART_INTERVALS))}",
         )
 
     ticker = normalize_yfinance_ticker(ticker.upper())
     corp_code = await _resolve_corp_code(ticker, db)
 
     result = await usecase.execute(
-        ticker=ticker, period=period, corp_code=corp_code, enrich_titles=enrich_titles
+        ticker=ticker, period=effective, corp_code=corp_code, enrich_titles=enrich_titles
     )
     return BaseResponse.ok(data=result)
 
@@ -96,7 +113,8 @@ async def get_timeline(
 @router.get("/timeline/stream")
 async def stream_timeline(
     ticker: str = Query(..., description="종목 코드 (예: AAPL, 005930)"),
-    period: str = Query("1Y", description="조회 기간: 1D | 1W | 1M | 1Y"),
+    chart_interval: Optional[str] = Query(None, description="봉 단위: 1D | 1W | 1M | 1Q"),
+    period: Optional[str] = Query(None, description="(deprecated) chart_interval 별칭"),
     enrich_titles: bool = Query(True, description="LLM 타이틀 생성 여부. False면 rule-based 타이틀만 반환"),
     db: AsyncSession = Depends(get_db),
     usecase: HistoryAgentUseCase = Depends(get_history_agent_usecase),
@@ -106,11 +124,14 @@ async def stream_timeline(
     클라이언트 disconnect 시 백그라운드 태스크를 취소해 불필요한 LLM/외부 호출을 차단합니다.
     15초마다 keepalive 프레임(`: ping`)을 송신합니다.
     """
-    if period not in _VALID_PERIODS:
+    effective = chart_interval or period or "1Y"
+    effective = normalize_chart_interval(effective)
+    if effective not in _VALID_CHART_INTERVALS:
         raise AppException(
             status_code=400,
-            message=f"유효하지 않은 period입니다. 사용 가능: {', '.join(sorted(_VALID_PERIODS))}",
+            message=f"유효하지 않은 chart_interval입니다. 사용 가능: {', '.join(sorted(_VALID_CHART_INTERVALS))}",
         )
+    period = effective  # 내부 변수는 그대로 period 이름 유지(UseCase 파라미터 호환)
 
     ticker = normalize_yfinance_ticker(ticker.upper())
     corp_code = await _resolve_corp_code(ticker, db)
@@ -358,6 +379,30 @@ async def stream_macro_timeline(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/anomaly-bars", response_model=BaseResponse[AnomalyBarsResponse])
+async def get_anomaly_bars(
+    ticker: str = Query(..., description="종목 코드"),
+    chart_interval: Optional[str] = Query(None, description="봉 단위: 1D | 1W | 1M | 1Q"),
+    period: Optional[str] = Query(None, description="(deprecated) chart_interval 별칭"),
+):
+    """차트 이상치 봉(★ 마커 대상)을 반환합니다. §13.4 C 설계로 PRICE 카테고리를 대체.
+
+    봉 단위별 adaptive threshold (k=2.5 × σ + floor) 로 평상시 대비 특이한 봉만 선별.
+    """
+    effective = chart_interval or period or "1D"
+    effective = normalize_chart_interval(effective)
+    if effective not in _VALID_CHART_INTERVALS:
+        raise AppException(
+            status_code=400,
+            message=f"유효하지 않은 chart_interval입니다. 사용 가능: {', '.join(sorted(_VALID_CHART_INTERVALS))}",
+        )
+
+    ticker = normalize_yfinance_ticker(ticker.upper())
+    usecase = DetectAnomalyBarsUseCase(stock_bars_port=YahooFinanceStockClient())
+    result = await usecase.execute(ticker=ticker, chart_interval=effective)
+    return BaseResponse.ok(data=result)
 
 
 @router.post("/titles", response_model=BaseResponse[TitleBatchResponse])

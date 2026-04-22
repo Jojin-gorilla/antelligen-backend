@@ -248,25 +248,21 @@ async def test_no_llm_title_call_when_enrich_titles_false():
 
     _module = "app.domains.history_agent.application.usecase.history_agent_usecase"
 
-    price_response = PriceEventsResponse(ticker=_TICKER, period="1M", count=0, events=[])
+    # §13.4 C: PRICE 카테고리 제거. price_titles·GetPriceEventsUseCase 참조 제거.
     corp_response = CorporateEventsResponse(ticker=_TICKER, period="1M", count=0, events=[])
     ann_response = AnnouncementsResponse(ticker=_TICKER, period="1M", count=0, events=[])
 
-    with patch(f"{_module}.enrich_price_titles", new_callable=AsyncMock) as mock_price_titles, \
-         patch(f"{_module}.enrich_other_titles", new_callable=AsyncMock) as mock_other_titles, \
-         patch(f"{_module}.GetPriceEventsUseCase") as MockPriceUC, \
+    with patch(f"{_module}.enrich_other_titles", new_callable=AsyncMock) as mock_other_titles, \
          patch(f"{_module}.GetCorporateEventsUseCase") as MockCorpUC, \
          patch(f"{_module}.GetAnnouncementsUseCase") as MockAnnUC, \
          patch(f"{_module}._enrich_causality", new_callable=AsyncMock), \
          patch(f"{_module}._enrich_announcement_details", new_callable=AsyncMock):
 
-        MockPriceUC.return_value.execute = AsyncMock(return_value=price_response)
         MockCorpUC.return_value.execute = AsyncMock(return_value=corp_response)
         MockAnnUC.return_value.execute = AsyncMock(return_value=ann_response)
 
         await usecase.execute(ticker=_TICKER, period="1M", enrich_titles=False)
 
-        mock_price_titles.assert_not_called()
         mock_other_titles.assert_not_called()
 
 

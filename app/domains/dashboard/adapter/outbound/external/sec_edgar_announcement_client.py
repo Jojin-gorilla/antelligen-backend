@@ -61,6 +61,20 @@ _TICKERS_LOCK = asyncio.Lock()
 _SEC_429_BACKOFF_SECONDS = 60.0
 _SEC_429_LAST_TS: dict[str, float] = {"ts": 0.0}
 
+# SEC EDGAR fair-use 정책: 초당 10req. 동시성 5로 제한해 burst 방지.
+# ETF holdings 병렬 fetch(SPY/QQQ 등) 시 ~30종목 × 5문서 = 150 요청이 동시에 발사되며
+# 실측 결과 단일 초에 228건 429 수신됨. 전역 semaphore로 throttle.
+_SEC_CONCURRENCY_LIMIT = 5
+_sec_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_sec_semaphore() -> asyncio.Semaphore:
+    """Lazy-init module-level semaphore. 이벤트 루프 바인딩 시점 지연."""
+    global _sec_semaphore
+    if _sec_semaphore is None:
+        _sec_semaphore = asyncio.Semaphore(_SEC_CONCURRENCY_LIMIT)
+    return _sec_semaphore
+
 
 def _primary_item_code(items_str: str) -> str:
     """items_str(예: '5.02' 또는 '1.01, 9.01')에서 첨부파일 외 첫 번째 Item 코드를 반환한다."""
@@ -188,7 +202,8 @@ class SecEdgarAnnouncementClient(SecEdgarAnnouncementPort):
                 return _TICKERS_CACHE["data"]  # type: ignore[return-value]
             try:
                 async with httpx.AsyncClient(timeout=30.0, headers={"User-Agent": _USER_AGENT}) as client:
-                    resp = await client.get(_TICKERS_URL)
+                    async with _get_sec_semaphore():
+                        resp = await client.get(_TICKERS_URL)
                 if resp.status_code == 429:
                     _SEC_429_LAST_TS["ts"] = now
                     retry_after = resp.headers.get("Retry-After")
@@ -223,7 +238,8 @@ class SecEdgarAnnouncementClient(SecEdgarAnnouncementPort):
             doc=primary_doc,
         )
         try:
-            resp = await client.get(url, timeout=_DOC_FETCH_TIMEOUT)
+            async with _get_sec_semaphore():
+                resp = await client.get(url, timeout=_DOC_FETCH_TIMEOUT)
             resp.raise_for_status()
             target_item = _primary_item_code(items_str)
             return _extract_item_body(resp.text, target_item)
@@ -242,7 +258,8 @@ class SecEdgarAnnouncementClient(SecEdgarAnnouncementPort):
             timeout=30.0,
             headers={"User-Agent": _USER_AGENT},
         ) as client:
-            resp = await client.get(_SUBMISSIONS_URL.format(cik=cik))
+            async with _get_sec_semaphore():
+                resp = await client.get(_SUBMISSIONS_URL.format(cik=cik))
             resp.raise_for_status()
             data = resp.json()
 

@@ -22,11 +22,10 @@ def _settings():
     return get_settings()
 
 
-# 배치/동시성/TOP_N은 런타임에 get_settings()로 읽는다.
+# 배치/동시성은 런타임에 get_settings()로 읽는다.
 # 하위 호환을 위한 모듈 상수 — import-time에 평가되어 테스트가 monkeypatch할 수 있다.
 TITLE_BATCH = _settings().history_title_batch_size
 TITLE_CONCURRENCY = _settings().history_title_concurrency
-PRICE_LLM_TOP_N = _settings().history_price_llm_top_n
 
 _JSON_RETRY_SUFFIX = (
     "\n\n반드시 JSON 배열만 출력하세요. 추가 설명이나 코드 펜스(```)를 넣지 마세요."
@@ -48,43 +47,8 @@ def _classify_error(exc: BaseException) -> str:
         return "rate_limit"
     return "other"
 
-PRICE_TITLE_SYSTEM = """\
-당신은 주식 시장 분석가입니다.
-각 가격 이벤트에 대해, 그 이벤트가 발생한 원인을 한 구절로 요약한 타이틀을 생성하십시오.
-
-규칙:
-- 타이틀은 15자 이내의 한국어
-- 단순 현상 설명이 아닌 원인·배경을 담는다
-- 인과 가설이 제공되면 반드시 활용한다
-- JSON 배열로만 응답: ["타이틀1", "타이틀2", ...]
-- 이벤트 순서와 배열 순서를 반드시 일치시킨다
-
-예시:
-- "연준 금리 동결 기대감"
-- "실적 쇼크 우려"
-- "AI 수혜 기대감으로 갭 상승"
-- "기관 대량 매도세"
-- "거시 불확실성 고조"
-"""
-
-INDEX_PRICE_TITLE_SYSTEM = """\
-당신은 글로벌 매크로 시장 분석가입니다.
-주가지수 가격 이벤트에 대해, 그 이벤트를 유발한 매크로 원인을 한 구절로 요약한 타이틀을 생성하십시오.
-
-규칙:
-- 타이틀은 15자 이내의 한국어
-- 개별 기업이 아닌 거시경제·섹터·정책 요인을 담는다
-- 인과 가설이 제공되면 반드시 활용한다
-- JSON 배열로만 응답: ["타이틀1", "타이틀2", ...]
-- 이벤트 순서와 배열 순서를 반드시 일치시킨다
-
-예시:
-- "연준 금리 인상 우려"
-- "유가 급등 여파"
-- "반도체 섹터 조정"
-- "인플레이션 재가속"
-- "달러 강세 압박"
-"""
+# §13.4 C: PRICE_TITLE_SYSTEM / INDEX_PRICE_TITLE_SYSTEM 제거 (PRICE 카테고리 제거).
+# 이상치 봉 causality는 DetectAnomalyBarsUseCase 쪽에서 별도 프롬프트 구성 예정.
 
 MACRO_TITLE_SYSTEM = """\
 당신은 거시경제 이벤트 분석가입니다.
@@ -170,27 +134,8 @@ def hypothesis_summary(event: TimelineEvent) -> str:
     return text.split("→")[0].strip() if "→" in text else text[:80]
 
 
-def price_importance(e: TimelineEvent) -> float:
-    """PRICE 이벤트의 LLM 타이틀 우선순위 점수. 높을수록 먼저 LLM 처리."""
-    score = abs(e.change_pct or 0.0)
-    if e.causality:
-        score += 100
-    if e.type in {"SURGE", "PLUNGE"}:
-        score += 50
-    if e.type == "LOW_52W":
-        score += 30
-    if e.type in {"GAP_UP", "GAP_DOWN"}:
-        score += 5
-    return score
-
-
-def rule_based_price_title(e: TimelineEvent) -> str:
-    """LLM 없이 생성하는 타이틀. 변화율이 있으면 '급등 (+5.2%)' 형태, 없으면 기본 라벨."""
-    kind = FALLBACK_TITLE.get(e.type, e.type)
-    if e.change_pct is not None:
-        sign = "+" if e.change_pct >= 0 else ""
-        return f"{kind} ({sign}{e.change_pct:.1f}%)"
-    return kind
+# §13.4 C: PRICE 카테고리 제거로 `price_importance`, `rule_based_price_title` 삭제.
+# 이상치 봉 판정은 DetectAnomalyBarsUseCase(abs z-score)로 대체.
 
 
 async def _invoke_llm(llm: Any, system_prompt: str, lines: str) -> str:
@@ -329,37 +274,7 @@ async def batch_titles(
     return titles
 
 
-async def enrich_price_titles(timeline: List[TimelineEvent], is_index: bool = False) -> None:
-    """PRICE 이벤트 타이틀 생성. is_index=True 시 매크로 관점 프롬프트를 사용한다."""
-    candidates = [e for e in timeline if e.category == "PRICE" and is_fallback_title(e)]
-    if not candidates:
-        return
-
-    system_prompt = INDEX_PRICE_TITLE_SYSTEM if is_index else PRICE_TITLE_SYSTEM
-    candidates.sort(key=price_importance, reverse=True)
-    top_n = _settings().history_price_llm_top_n
-    llm_targets = candidates[:top_n]
-    rule_targets = candidates[top_n:]
-
-    logger.info(
-        "[TitleService] ✦ PRICE 타이틀 (%s): LLM=%d, rule-based=%d (total=%d, cutoff=top %d)",
-        "INDEX" if is_index else "EQUITY",
-        len(llm_targets), len(rule_targets), len(candidates), top_n,
-    )
-
-    for e in rule_targets:
-        e.title = rule_based_price_title(e)
-
-    if not llm_targets:
-        return
-
-    def build_line(e: TimelineEvent) -> str:
-        return f"type={e.type} detail={e.detail} | 인과가설: {hypothesis_summary(e)}"
-
-    titles = await batch_titles(llm_targets, system_prompt, build_line)
-    for event, title in zip(llm_targets, titles):
-        event.title = title
-    logger.info("[TitleService] ✦ PRICE 타이틀 생성 완료 (LLM=%d)", len(llm_targets))
+# §13.4 C: enrich_price_titles 삭제 (PRICE 카테고리 제거).
 
 
 async def enrich_other_titles(timeline: List[TimelineEvent]) -> None:

@@ -67,7 +67,6 @@ class Settings(BaseSettings):
     # History Agent — LLM 타이틀 / causality 튜닝 파라미터 (T2-5)
     history_title_batch_size: int = 15
     history_title_concurrency: int = 10
-    history_price_llm_top_n: int = 50
     history_causality_pre_days: int = 14
     history_causality_post_days: int = 3
     # T2-1 Phase B: INDEX causality LLM 확장 feature flag.
@@ -81,8 +80,6 @@ class Settings(BaseSettings):
     history_news_scrape_enabled: bool = False
     # 영문 NEWS 제목을 한국어 1문장 요약으로 교체 (비용: 기사당 1회 LLM 호출)
     history_news_korean_summary_enabled: bool = True
-    # PRICE 이벤트는 price_importance 상위 N개만 응답에 포함 (S2-4 과탐 방지)
-    history_price_event_cap: int = 80
     history_related_assets_threshold_pct: float = 2.0
     history_gpr_mom_change_pct: float = 20.0
     yfinance_retry_max_attempts: int = 3

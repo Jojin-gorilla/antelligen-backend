@@ -25,7 +25,6 @@ from app.domains.dashboard.application.port.out.yfinance_corporate_event_port im
 from app.domains.dashboard.application.response.announcement_response import AnnouncementsResponse
 from app.domains.dashboard.application.response.corporate_event_response import CorporateEventsResponse
 from app.domains.dashboard.application.response.economic_event_response import EconomicEventsResponse
-from app.domains.dashboard.application.response.price_event_response import PriceEventsResponse
 from app.domains.dashboard.application.usecase.get_announcements_usecase import (
     GetAnnouncementsUseCase,
 )
@@ -35,7 +34,6 @@ from app.domains.dashboard.application.usecase.get_corporate_events_usecase impo
 from app.domains.dashboard.application.usecase.get_economic_events_usecase import (
     GetEconomicEventsUseCase,
 )
-from app.domains.dashboard.application.usecase.get_price_events_usecase import GetPriceEventsUseCase
 from app.domains.history_agent.application.usecase.collect_important_macro_events_usecase import (
     CollectImportantMacroEventsUseCase,
 )
@@ -69,9 +67,7 @@ from app.domains.history_agent.application.service.title_generation_service impo
     TITLE_MODEL,
     enrich_macro_titles,
     enrich_other_titles,
-    enrich_price_titles,
     is_fallback_title,
-    rule_based_price_title,
 )
 from app.domains.history_agent.domain.entity.event_enrichment import (
     EventEnrichment,
@@ -97,12 +93,6 @@ _MAX_CAUSALITY_EVENTS = 3
 def _causality_window_days() -> tuple[int, int]:
     s = get_settings()
     return s.history_causality_pre_days, s.history_causality_post_days
-
-# ── 표시 제외 이벤트 타입 ────────────────────────────────────────
-_EXCLUDED_PRICE_TYPES = {"HIGH_52W"}
-
-# value 필드가 변화율(%)인 PRICE 타입 — change_pct 세팅용
-_PCT_VALUE_TYPES = {"SURGE", "PLUNGE", "GAP_UP", "GAP_DOWN"}
 
 # ── 공시 중복 제거 ─────────────────────────────────────────────
 # 이중상장(예: ADR) 기업에서 DART/SEC EDGAR가 같은 날 유사 공시를 발행할 때 병합.
@@ -304,45 +294,10 @@ async def _enrich_news_details(timeline: List[TimelineEvent]) -> None:
     logger.info("[HistoryAgent] ✦ 뉴스 한국어 요약 완료")
 
 
-def _from_price_events(result: PriceEventsResponse) -> List[TimelineEvent]:
-    # 1차: 원본 이벤트를 TimelineEvent로 변환 (HIGH_52W는 제외, S2-3/S2-4 후처리 대상)
-    events = [
-        TimelineEvent(
-            title=FALLBACK_TITLE.get(e.type, e.type),
-            date=e.date,
-            category="PRICE",
-            type=e.type,
-            detail=e.detail,
-            source=None,
-            url=None,
-            change_pct=e.value if e.type in _PCT_VALUE_TYPES else None,
-        )
-        for e in result.events
-        if e.type not in _EXCLUDED_PRICE_TYPES
-    ]
-
-    # S2-3: LOW_52W는 기간 내 "가장 낮은 종가" 1건만 남긴다.
-    # (기존에는 매 저가 갱신일마다 1건씩 쌓여 NVDA 1Y 60건 수준.)
-    low_52w = [e for e in events if e.type == "LOW_52W"]
-    if len(low_52w) > 1:
-        # detail에 가격 정보가 있을 수도 있으나 안정적 정렬을 위해 날짜 오름차순 후 하나 유지.
-        # 수치 정보가 없을 때는 가장 최근 저가(최신 날짜)를 대표로 남긴다.
-        low_52w.sort(key=lambda e: e.date, reverse=True)
-        keep = low_52w[:1]
-        others = [e for e in events if e.type != "LOW_52W"]
-        events = others + keep
-
-    # S2-4: PRICE 이벤트 상한 적용 (price_importance 기준 Top-N).
-    # 순환 import 회피: 지연 import.
-    from app.domains.history_agent.application.service.title_generation_service import (
-        price_importance,
-    )
-
-    cap = get_settings().history_price_event_cap
-    if len(events) > cap:
-        events.sort(key=price_importance, reverse=True)
-        events = events[:cap]
-    return events
+# §13.4 C — PRICE 카테고리 완전 철거 (2026-04 결정).
+# 기존 `_from_price_events`·`_PCT_VALUE_TYPES`·`_EXCLUDED_PRICE_TYPES`·
+# `history_price_event_cap`·`price_importance` 는 모두 제거됨.
+# 대체: 차트 이상치 봉 마커(/anomaly-bars) + popover 기반 causality.
 
 
 def _from_corporate_events(result: CorporateEventsResponse) -> List[TimelineEvent]:
@@ -360,10 +315,34 @@ def _from_corporate_events(result: CorporateEventsResponse) -> List[TimelineEven
     ]
 
 
-def _from_announcements(result: AnnouncementsResponse) -> List[TimelineEvent]:
+def _announcement_title(ticker: str, event_type: str, source: str) -> str:
+    """ANNOUNCEMENT fallback title에 기업명/식별자 prefix를 붙여 같은 날 여러 공시가
+    동일한 "주요 공시" 제목으로 붙어 UI에서 중복처럼 보이는 문제를 해결한다(§17 B2).
+
+    - 미국 8-K (sec_edgar): "{ticker} 8-K"
+    - 한국 DART: "{ticker} 주요 공시"
+    - 기타: 기존 fallback 유지
+    """
+    if not ticker:
+        return FALLBACK_TITLE.get(event_type, event_type)
+    if source and "sec_edgar" in source.lower():
+        return f"{ticker} 8-K"
+    if source and "dart" in source.lower():
+        return f"{ticker} 주요 공시"
+    return f"{ticker} {FALLBACK_TITLE.get(event_type, event_type)}"
+
+
+def _from_announcements(
+    result: AnnouncementsResponse, ticker_label: Optional[str] = None
+) -> List[TimelineEvent]:
+    """`ticker_label` 지정 시 title에 prefix 추가. 지정 없으면 기존 fallback."""
     return [
         TimelineEvent(
-            title=FALLBACK_TITLE.get(e.type, e.type),
+            title=(
+                _announcement_title(ticker_label, e.type, e.source)
+                if ticker_label
+                else FALLBACK_TITLE.get(e.type, e.type)
+            ),
             date=e.date,
             category="ANNOUNCEMENT",
             type=e.type,
@@ -751,7 +730,7 @@ class HistoryAgentUseCase:
             await self._redis.setex(cache_key, _CACHE_TTL, response.model_dump_json())
             return response
 
-        price_uc = GetPriceEventsUseCase(stock_bars_port=self._stock_bars_port)
+        # §13.4 C: PRICE 카테고리 제거 — 가격 이벤트는 차트 이상치 봉 마커로 이동.
         corporate_uc = GetCorporateEventsUseCase(
             yfinance_port=self._yfinance_corporate_port,
             dart_client=self._dart_corporate_client,
@@ -761,14 +740,13 @@ class HistoryAgentUseCase:
             dart_client=self._dart_announcement_client,
         )
 
-        logger.info("[HistoryAgent] [1/4] 데이터 수집 시작 (가격/기업이벤트/공시/뉴스/fundamentals 병렬)")
+        logger.info("[HistoryAgent] [1/4] 데이터 수집 시작 (기업이벤트/공시/뉴스/fundamentals 병렬)")
         await _notify("data_fetch", "데이터 수집 중...", 10)
         region = _resolve_equity_region(ticker)
         (
-            price_result, corporate_result, announcement_result,
+            corporate_result, announcement_result,
             news_events, fundamentals_events,
         ) = await asyncio.gather(
-            price_uc.execute(ticker=ticker, period=period),
             corporate_uc.execute(ticker=ticker, period=period, corp_code=corp_code),
             announcement_uc.execute(ticker=ticker, period=period, corp_code=corp_code),
             self._collect_news_events(ticker=ticker, period=period, region=region),
@@ -778,13 +756,6 @@ class HistoryAgentUseCase:
 
         timeline: List[TimelineEvent] = []
 
-        if isinstance(price_result, PriceEventsResponse):
-            events = _from_price_events(price_result)
-            timeline.extend(events)
-            logger.info("[HistoryAgent]   └ 가격 이벤트: %d건", len(events))
-        else:
-            logger.warning("[HistoryAgent]   └ 가격 이벤트 수집 실패: %s", price_result)
-
         if isinstance(corporate_result, CorporateEventsResponse):
             events = _from_corporate_events(corporate_result)
             timeline.extend(events)
@@ -793,7 +764,7 @@ class HistoryAgentUseCase:
             logger.warning("[HistoryAgent]   └ 기업 이벤트 수집 실패: %s", corporate_result)
 
         if isinstance(announcement_result, AnnouncementsResponse):
-            events = _from_announcements(announcement_result)
+            events = _from_announcements(announcement_result, ticker_label=ticker)
             timeline.extend(events)
             logger.info("[HistoryAgent]   └ 공시: %d건", len(events))
         else:
@@ -828,30 +799,22 @@ class HistoryAgentUseCase:
         )
 
         # 2) causality / 비-PRICE 타이틀 / 공시 요약을 병렬 실행.
-        #    PRICE 타이틀만 causality 가설을 사용하므로 (causality → price_titles) 체인만
-        #    직렬 유지하고 나머지는 동시에 진행한다.
+        #    §13.4 C에서 PRICE 카테고리가 제거되어 price_titles 체인은 불필요.
         logger.info("[HistoryAgent] [3/4] 인과관계 + 타이틀 생성 (병렬, 신규 이벤트만)")
         await _notify("causality", "인과관계 분석 · 타이틀 생성 중...", 55)
 
-        async def _causality_then_price_titles() -> None:
-            await _enrich_causality(ticker, timeline)
-            if enrich_titles:
-                await enrich_price_titles(timeline)
-            else:
-                for e in timeline:
-                    if e.category == "PRICE" and is_fallback_title(e):
-                        e.title = rule_based_price_title(e)
+        causality_task = _enrich_causality(ticker, timeline)
 
         if enrich_titles:
             await asyncio.gather(
-                _causality_then_price_titles(),
+                causality_task,
                 enrich_other_titles(timeline),
                 _enrich_announcement_details(timeline),
                 _enrich_news_details(timeline),
             )
         else:
             await asyncio.gather(
-                _causality_then_price_titles(),
+                causality_task,
                 _enrich_announcement_details(timeline),
                 _enrich_news_details(timeline),
             )
@@ -887,29 +850,19 @@ class HistoryAgentUseCase:
                 except Exception:
                     pass
 
-        logger.info("[HistoryAgent] INDEX 경로: PRICE + 중요 MACRO 수집 시작 (기업이벤트·공시 생략)")
+        logger.info("[HistoryAgent] INDEX 경로: 중요 MACRO + 뉴스 수집 시작 (가격·기업이벤트·공시 생략)")
         await _notify("data_fetch", "데이터 수집 중...", 10)
 
         region = _INDEX_REGION.get(ticker, _DEFAULT_INDEX_REGION)
         (
-            price_result, macro_events, news_events,
+            macro_events, news_events,
         ) = await asyncio.gather(
-            GetPriceEventsUseCase(stock_bars_port=self._stock_bars_port).execute(
-                ticker=ticker, period=period,
-            ),
             self._collect_important_macro_events(region=region, period=period),
             self._collect_news_events(ticker=ticker, period=period, region="GLOBAL"),
             return_exceptions=True,
         )
 
         timeline: List[TimelineEvent] = []
-        if isinstance(price_result, PriceEventsResponse):
-            events = _from_price_events(price_result)
-            timeline.extend(events)
-            logger.info("[HistoryAgent]   └ 가격 이벤트: %d건", len(events))
-        else:
-            logger.warning("[HistoryAgent]   └ 가격 이벤트 수집 실패: %s", price_result)
-
         if isinstance(macro_events, list):
             timeline.extend(macro_events)
             logger.info("[HistoryAgent]   └ 중요 MACRO 이벤트: %d건", len(macro_events))
@@ -935,14 +888,10 @@ class HistoryAgentUseCase:
         await _notify("title_gen", "AI 타이틀 생성 중...", 70)
         if enrich_titles:
             await asyncio.gather(
-                enrich_price_titles(timeline, is_index=True),
                 enrich_macro_titles(timeline),
                 _enrich_news_details(timeline),
             )
         else:
-            for e in timeline:
-                if e.category == "PRICE" and is_fallback_title(e):
-                    e.title = rule_based_price_title(e)
             await _enrich_news_details(timeline)
 
         await self._save_enrichments(ticker, new_events)
@@ -982,25 +931,16 @@ class HistoryAgentUseCase:
         )
         await _notify("data_fetch", "ETF 데이터 수집 중...", 10)
 
+        # §13.4 C: ETF도 PRICE 카테고리 제거 — 이상치 봉 마커로 대체.
         (
-            price_result, macro_events, news_events,
+            macro_events, news_events,
         ) = await asyncio.gather(
-            GetPriceEventsUseCase(stock_bars_port=self._stock_bars_port).execute(
-                ticker=ticker, period=period,
-            ),
             self._collect_important_macro_events(region=region, period=period),
             self._collect_news_events(ticker=ticker, period=period, region="GLOBAL"),
             return_exceptions=True,
         )
 
         timeline: List[TimelineEvent] = []
-        if isinstance(price_result, PriceEventsResponse):
-            events = _from_price_events(price_result)
-            timeline.extend(events)
-            logger.info("[HistoryAgent]   └ ETF 가격 이벤트: %d건", len(events))
-        else:
-            logger.warning("[HistoryAgent]   └ ETF 가격 이벤트 수집 실패: %s", price_result)
-
         if isinstance(macro_events, list):
             timeline.extend(macro_events)
             logger.info("[HistoryAgent]   └ ETF 중요 MACRO 이벤트: %d건", len(macro_events))
@@ -1037,16 +977,12 @@ class HistoryAgentUseCase:
         await _notify("title_gen", "AI 타이틀 생성 중...", 70)
         if enrich_titles:
             await asyncio.gather(
-                enrich_price_titles(timeline, is_index=True),
                 enrich_macro_titles(timeline),
                 enrich_other_titles(timeline),
                 _enrich_announcement_details(timeline),
                 _enrich_news_details(timeline),
             )
         else:
-            for e in timeline:
-                if e.category == "PRICE" and is_fallback_title(e):
-                    e.title = rule_based_price_title(e)
             await asyncio.gather(
                 _enrich_announcement_details(timeline),
                 _enrich_news_details(timeline),
@@ -1234,7 +1170,7 @@ class HistoryAgentUseCase:
                     e.source = f"{etf_ticker}:{e.source or 'CORP'}"
                     events.append(e)
             if isinstance(ann, AnnouncementsResponse):
-                for e in _from_announcements(ann):
+                for e in _from_announcements(ann, ticker_label=h.ticker):
                     e.constituent_ticker = h.ticker
                     e.weight_pct = h.weight_pct
                     e.source = f"{etf_ticker}:{e.source or 'ANN'}"

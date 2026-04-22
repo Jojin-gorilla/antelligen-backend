@@ -60,25 +60,17 @@ async def test_unsupported_asset_type_returns_empty_response():
 
 @pytest.mark.asyncio
 async def test_etf_dispatches_to_etf_path_without_causality():
-    """ETF는 index 스타일 경로로 수집(PRICE+MACRO)하며 is_etf=True."""
+    """ETF는 MACRO+뉴스 경로로 수집되며 is_etf=True. §13.4 C: PRICE 카테고리 제거됨."""
     usecase, redis_mock = _make_usecase_with_quote_type("ETF")
 
     _module = "app.domains.history_agent.application.usecase.history_agent_usecase"
-    with patch(f"{_module}.GetPriceEventsUseCase") as MockPrice, \
-         patch(f"{_module}.GetEconomicEventsUseCase") as MockMacro, \
-         patch(f"{_module}.enrich_price_titles", new_callable=AsyncMock), \
+    with patch(f"{_module}.GetEconomicEventsUseCase") as MockMacro, \
          patch(f"{_module}.enrich_macro_titles", new_callable=AsyncMock), \
          patch(f"{_module}.enrich_other_titles", new_callable=AsyncMock), \
          patch(f"{_module}._enrich_announcement_details", new_callable=AsyncMock):
 
-        from app.domains.dashboard.application.response.price_event_response import (
-            PriceEventsResponse,
-        )
         from app.domains.dashboard.application.response.economic_event_response import (
             EconomicEventsResponse,
-        )
-        MockPrice.return_value.execute = AsyncMock(
-            return_value=PriceEventsResponse(ticker="SPY", period="1Y", count=0, events=[])
         )
         MockMacro.return_value.execute = AsyncMock(
             return_value=EconomicEventsResponse(period="1Y", count=0, events=[])
