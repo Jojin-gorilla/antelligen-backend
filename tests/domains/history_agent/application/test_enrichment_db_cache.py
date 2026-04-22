@@ -221,7 +221,6 @@ async def test_no_llm_title_call_when_enrich_titles_false():
     """enrich_titles=False이면 enrich_price_titles / enrich_other_titles가 호출되지 않는다."""
     from app.domains.dashboard.application.response.announcement_response import AnnouncementsResponse
     from app.domains.dashboard.application.response.corporate_event_response import CorporateEventsResponse
-    from app.domains.dashboard.application.response.price_event_response import PriceEventsResponse
 
     redis_mock = AsyncMock()
     redis_mock.get = AsyncMock(return_value=None)
