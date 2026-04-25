@@ -109,6 +109,10 @@ def create_disclosure_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(hour=16, minute=30, timezone=KST),
         id="collect_investor_flow",
         name="Collect KRX investor net-buy flow",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+
     # Daily 04:15 KST — macro-timeline(1Y/5Y/10Y × US/KR/GLOBAL) Redis 워밍업
     # 품질 리포트 S1-2: cold 요청 180s 타임아웃 방지
     scheduler.add_job(
@@ -127,6 +131,10 @@ def create_disclosure_scheduler() -> AsyncIOScheduler:
         trigger=CronTrigger(month="2,5,8,11", day=15, hour=9, minute=0, timezone=KST),
         id="collect_global_portfolio",
         name="Collect global investor 13F portfolios",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     # Quarterly 02:00 KST — 잠정실적 일정 재수집.
     # 기업들이 KRX 에 실제 공시 일정을 통보하는 시점(분기 종료 후 1~2주)에 맞춰
     # 1/2, 4/2, 7/2, 10/2 에 실행하여 새 일정을 upsert.
