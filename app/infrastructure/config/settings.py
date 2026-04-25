@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     finnhub_api_key: str = ""
 
+    krx_id: str = ""
+    krx_pw: str = ""
     # History Agent — LLM 타이틀 / causality 튜닝 파라미터 (T2-5)
     history_title_batch_size: int = 15
     history_title_concurrency: int = 10

@@ -49,6 +49,8 @@ import app.domains.news.infrastructure.orm.investment_news_orm  # noqa: F401
 import app.domains.schedule.infrastructure.orm.economic_event_orm  # noqa: F401
 import app.domains.dashboard.infrastructure.orm.nasdaq_bar_orm  # noqa: F401
 import app.domains.history_agent.infrastructure.orm.event_enrichment_orm  # noqa: F401
+import app.domains.smart_money.infrastructure.orm.investor_flow_orm  # noqa: F401
+import app.domains.smart_money.infrastructure.orm.global_portfolio_orm  # noqa: F401
 
 setup_logging()
 configure_langsmith()

@@ -16,6 +16,7 @@ from app.infrastructure.scheduler.disclosure_jobs import (
 
 from app.infrastructure.scheduler.nasdaq_jobs import job_collect_nasdaq_bars
 from app.infrastructure.scheduler.macro_jobs import job_refresh_market_risk
+from app.infrastructure.scheduler.smart_money_jobs import job_collect_investor_flow, job_collect_global_portfolio
 from app.infrastructure.scheduler.macro_timeline_jobs import job_warmup_macro_timeline
 from app.infrastructure.scheduler.corp_earnings_jobs import job_refresh_corp_earnings
 
@@ -102,6 +103,12 @@ def create_disclosure_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=600,
     )
 
+    # Daily 16:30 KST — 장 마감 후 투자자 유형별 순매수 데이터 수집 (KRX)
+    scheduler.add_job(
+        job_collect_investor_flow,
+        trigger=CronTrigger(hour=16, minute=30, timezone=KST),
+        id="collect_investor_flow",
+        name="Collect KRX investor net-buy flow",
     # Daily 04:15 KST — macro-timeline(1Y/5Y/10Y × US/KR/GLOBAL) Redis 워밍업
     # 품질 리포트 S1-2: cold 요청 180s 타임아웃 방지
     scheduler.add_job(
@@ -113,6 +120,13 @@ def create_disclosure_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=1800,
     )
 
+    # Quarterly — 글로벌 저명 투자자 13F 포트폴리오 수집 (분기 공시 마감 45일 후)
+    # 2월 15일, 5월 15일, 8월 15일, 11월 15일 09:00 KST
+    scheduler.add_job(
+        job_collect_global_portfolio,
+        trigger=CronTrigger(month="2,5,8,11", day=15, hour=9, minute=0, timezone=KST),
+        id="collect_global_portfolio",
+        name="Collect global investor 13F portfolios",
     # Quarterly 02:00 KST — 잠정실적 일정 재수집.
     # 기업들이 KRX 에 실제 공시 일정을 통보하는 시점(분기 종료 후 1~2주)에 맞춰
     # 1/2, 4/2, 7/2, 10/2 에 실행하여 새 일정을 upsert.
