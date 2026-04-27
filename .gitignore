@@ -150,3 +150,4 @@ logs/
 alembic.ini.bak
 sentiment_template/
 sentiment_template.tar.gz
+test_sentiment_*.py
